@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GRID CHALLENGE - Hourglass & Green Boundary</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Courier New', monospace;
+            background: #0a0c15;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            display: flex;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            cursor: pointer;
+        }
+
+        /* Setup Screen */
+        .setup-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0c15 0%, #161a2a 100%);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .setup-card {
+            background: rgba(20, 25, 45, 0.95);
+            border-radius: 28px;
+            padding: 40px 50px;
+            text-align: center;
+            border: 2px solid rgba(100, 150, 255, 0.3);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            min-width: 450px;
+        }
+
+        .setup-card h1 {
+            font-size: 48px;
+            background: linear-gradient(135deg, #ffd700, #88aaff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .setup-card h2 {
+            color: #88aaff;
+            font-size: 20px;
+            margin-bottom: 30px;
+            letter-spacing: 2px;
+        }
+
+        .setup-input-group {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .setup-input-group label {
+            color: #aaa;
+            font-size: 18px;
+            font-weight: bold;
+            width: 80px;
+            text-align: right;
+        }
+
+        .setup-input-group input {
+            width: 100px;
+            padding: 10px 15px;
+            font-size: 20px;
+            text-align: center;
+            background: #1a1e2e;
+            border: 2px solid #3a3e5e;
+            border-radius: 12px;
+            color: #ffd700;
+            font-weight: bold;
+            outline: none;
+        }
+
+        .setup-input-group input:focus {
+            border-color: #ffd700;
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #2a6f8f, #1a4f6f);
+            border: none;
+            padding: 14px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+            border: 1px solid rgba(255,215,0,0.5);
+        }
+
+        .start-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+        }
+
+        .error-msg {
+            color: #ff4444;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+
+        @media (max-width: 800px) {
+            .setup-card { min-width: 320px; padding: 30px 25px; }
+            .setup-card h1 { font-size: 32px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-screen" id="setupScreen">
+        <div class="setup-card">
+            <h1>⚡ GRID CHALLENGE ⚡</h1>
+            <h2>Click BLUE → +10 &nbsp;&nbsp;|&nbsp;&nbsp; Avoid RED → -1 ❤️</h2>
+            <div class="setup-input-group">
+                <label>ROWS:</label>
+                <input type="number" id="rowsInput" min="8" max="20" value="12">
+            </div>
+            <div class="setup-input-group">
+                <label>COLS:</label>
+                <input type="number" id="colsInput" min="8" max="20" value="10">
+            </div>
+            <button class="start-btn" id="startGameBtn">▶ START GAME</button>
+            <div class="error-msg" id="setupError"></div>
+        </div>
+    </div>
+
+    <div class="game-container" id="gameContainer" style="display: none;">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        let ctx = canvas.getContext('2d');
+
+        // Game state
+        let gameRunning = true;
+        let animationId = null;
+        let lastTimestamp = 0;
+
+        // Pattern enum
+        const Pattern = { HOURGLASS: 1, GREEN_BOUNDARY: 2 };
+        let currentPattern = Pattern.HOURGLASS;
+        
+        // Grid dimensions
+        let ROWS = 12;
+        let COLS = 10;
+        let CELL_W = 0;
+        let CELL_H = 0;
+        let PANEL_W = 220;
+        
+        // Game data
+        let score = 0;
+        let lives = 5;
+        let timeLeft = 50;
+        let pointsClicked = 0;
+        let targetPoints = 25;
+        
+        // Pattern 1: Hourglass scrolling
+        let scrollY = 0;
+        const SCROLL_SPEED = 55; // pixels per second
+        const HOUR_ROWS = 10;
+        const GAP_ROWS = 5;
+        let worldRows = [];
+        let worldLive = [];
+        
+        // Pattern 2: Green boundary
+        let greenCells = new Set();
+        let redCells = new Set();
+        let blueCells = new Set();
+        let moveTimer = 0;
+        let spawnTimer = 0;
+        const MOVE_INTERVAL = 0.45;
+        const SPAWN_INTERVAL = 1.2;
+        
+        // Visual effects
+        let blinkCells = new Map();
+        let particles = [];
+        let flashAlpha = 0;
+        let flashColor = null;
+        let animTime = 0;
+        
+        // Game state
+        let gameState = 'playing'; // playing, win, lose
+        
+        // Setup screen elements
+        const setupScreen = document.getElementById('setupScreen');
+        const gameContainer = document.getElementById('gameContainer');
+        const rowsInput = document.getElementById('rowsInput');
+        const colsInput = document.getElementById('colsInput');
+        const startBtn = document.getElementById('startGameBtn');
+        const setupError = document.getElementById('setupError');
+        
+        // ============ UTILITIES ============
+        function lerpColor(a, b, t) {
+            return [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t
+            ];
+        }
+        
+        function pulse(t, speed = 2.0) {
+            return 0.5 + 0.5 * Math.sin(t * speed);
+        }
+        
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 3 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed - Math.random() * 2;
+                this.life = 1.0;
+                this.decay = 0.03 + Math.random() * 0.03;
+                this.color = color;
+                this.size = Math.random() * 3 + 2;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.2;
+                this.life -= this.decay;
+                return this.life > 0;
+            }
+            
+            draw(ctx) {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = `rgb(${this.color[0]}, ${this.color[1]}, ${this.color[2]})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+        
+        // ============ PATTERN 1: HOURGLASS ============
+        function isHourglassDanger(localRow, col, cols) {
+            const midRow = (HOUR_ROWS - 1) / 2;
+            const midCol = (cols - 1) / 2;
+            const t = Math.abs(localRow - midRow) / midRow;
+            const armLeft = midCol * (1 - t);
+            const armRight = (cols - 1) - armLeft;
+            const thickness = 1.2;
+            return Math.abs(col - armLeft) <= thickness || Math.abs(col - armRight) <= thickness;
+        }
+        
+        function buildWorld() {
+            const totalRows = (HOUR_ROWS + GAP_ROWS) * 8;
+            worldRows = [];
+            
+            for (let wr = 0; wr < totalRows; wr++) {
+                const period = HOUR_ROWS + GAP_ROWS;
+                const p = wr % period;
+                const row = [];
+                
+                if (p < HOUR_ROWS) {
+                    // Hourglass block
+                    for (let c = 0; c < COLS; c++) {
+                        if (isHourglassDanger(p, c, COLS)) {
+                            row.push('danger');
+                        } else {
+                            // Random blue inside X
+                            if (Math.random() < 0.18) {
+                                row.push('point');
+                            } else {
+                                row.push('empty');
+                            }
+                        }
+                    }
+                } else {
+                    // Gap between hourglasses
+                    for (let c = 0; c < COLS; c++) {
+                        if (Math.random() < 0.28) {
+                            row.push('point');
+                        } else {
+                            row.push('empty');
+                        }
+                    }
+                }
+                worldRows.push(row);
+            }
+            
+            // Create live copy
+            worldLive = worldRows.map(row => [...row]);
+        }
+        
+        function getVisibleGrid() {
+            const startRow = Math.floor(scrollY / CELL_H);
+            const offsetY = scrollY - startRow * CELL_H;
+            const grid = [];
+            
+            for (let r = 0; r < ROWS; r++) {
+                const worldRow = (startRow + r) % worldRows.length;
+                grid.push([...worldLive[worldRow]]);
+            }
+            
+            return { grid, offsetY };
+        }
+        
+        function handleClickPattern1(cellX, cellY, mouseX, mouseY) {
+            const startRow = Math.floor(scrollY / CELL_H);
+            const worldRow = (startRow + cellY) % worldRows.length;
+            const cellType = worldLive[worldRow][cellX];
+            
+            const sx = cellX * CELL_W + CELL_W / 2;
+            const sy = cellY * CELL_H + CELL_H / 2;
+            
+            if (cellType === 'point') {
+                worldLive[worldRow][cellX] = 'empty';
+                score += 10;
+                pointsClicked++;
+                flashColor = [95, 165, 255];
+                flashAlpha = 130;
+                for (let i = 0; i < 15; i++) {
+                    particles.push(new Particle(sx, sy, [95, 165, 255]));
+                }
+                if (pointsClicked >= targetPoints) {
+                    gameState = 'win';
+                }
+                return true;
+            } else if (cellType === 'danger') {
+                lives--;
+                blinkCells.set(`${cellX},${cellY}`, 15);
+                flashColor = [255, 75, 75];
+                flashAlpha = 180;
+                for (let i = 0; i < 18; i++) {
+                    particles.push(new Particle(sx, sy, [255, 75, 75]));
+                }
+                if (lives <= 0) {
+                    gameState = 'lose';
+                }
+                return true;
+            }
+            return false;
+        }
+        
+        // ============ PATTERN 2: GREEN BOUNDARY ============
+        function initPattern2() {
+            greenCells.clear();
+            redCells.clear();
+            blueCells.clear();
+            
+            // Create green boundaries
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) {
+                        greenCells.add(`${r},${c}`);
+                    } else if (r % 3 === 0) {
+                        greenCells.add(`${r},${c}`);
+                    } else if (c % 4 === 0) {
+                        greenCells.add(`${r},${c}`);
+                    }
+                }
+            }
+            
+            // Add red cells in non-green areas
+            const allCells = [];
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (!greenCells.has(`${r},${c}`)) {
+                        allCells.push(`${r},${c}`);
+                    }
+                }
+            }
+            allCells.sort(() => Math.random() - 0.5);
+            const numRed = Math.max(4, Math.floor((ROWS * COLS) / 10));
+            for (let i = 0; i < numRed && i < allCells.length; i++) {
+                redCells.add(allCells[i]);
+            }
+            
+            // Add initial blue cells in green zones
+            const greenList = Array.from(greenCells).filter(cell => !redCells.has(cell));
+            greenList.sort(() => Math.random() - 0.5);
+            const maxBlue = Math.max(3, Math.floor((ROWS * COLS) / 15));
+            for (let i = 0; i < Math.min(maxBlue, greenList.length); i++) {
+                blueCells.add(greenList[i]);
+            }
+        }
+        
+        function moveRedCells() {
+            const dirs = [[-1,0], [1,0], [0,-1], [0,1]];
+            const newRed = new Set();
+            const occupied = new Set([...redCells, ...blueCells]);
+            const redList = Array.from(redCells);
+            redList.sort(() => Math.random() - 0.5);
+            
+            for (const cell of redList) {
+                const [r, c] = cell.split(',').map(Number);
+                let moved = false;
+                const shuffledDirs = [...dirs].sort(() => Math.random() - 0.5);
+                
+                for (const [dr, dc] of shuffledDirs) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                        const target = `${nr},${nc}`;
+                        if (!occupied.has(target) && !newRed.has(target)) {
+                            newRed.add(target);
+                            moved = true;
+                            break;
+                        }
+                    }
+                }
+                if (!moved) {
+                    newRed.add(cell);
+                }
+            }
+            redCells = newRed;
+        }
+        
+        function spawnBlueCell() {
+            const maxBlue = Math.max(3, Math.floor((ROWS * COLS) / 15));
+            if (blueCells.size >= maxBlue) return;
+            
+            const available = Array.from(greenCells).filter(cell => 
+                !redCells.has(cell) && !blueCells.has(cell)
+            );
+            if (available.length > 0) {
+                const randomIndex = Math.floor(Math.random() * available.length);
+                blueCells.add(available[randomIndex]);
+            }
+        }
+        
+        function handleClickPattern2(cellX, cellY, mouseX, mouseY) {
+            const cellKey = `${cellX},${cellY}`;
+            const sx = cellX * CELL_W + CELL_W / 2;
+            const sy = cellY * CELL_H + CELL_H / 2;
+            
+            if (blueCells.has(cellKey)) {
+                blueCells.delete(cellKey);
+                score += 10;
+                pointsClicked++;
+                flashColor = [95, 165, 255];
+                flashAlpha = 130;
+                for (let i = 0; i < 15; i++) {
+                    particles.push(new Particle(sx, sy, [95, 165, 255]));
+                }
+                if (pointsClicked >= targetPoints) {
+                    gameState = 'win';
+                }
+                return true;
+            } else if (redCells.has(cellKey)) {
+                lives--;
+                blinkCells.set(cellKey, 15);
+                flashColor = [255, 75, 75];
+                flashAlpha = 180;
+                for (let i = 0; i < 18; i++) {
+                    particles.push(new Particle(sx, sy, [255, 75, 75]));
+                }
+                if (lives <= 0) {
+                    gameState = 'lose';
+                }
+                return true;
+            }
+            return false;
+        }
+        
+        // ============ GAME LOOP ============
+        function update(deltaTime) {
+            if (gameState !== 'playing') return;
+            
+            animTime += deltaTime;
+            timeLeft -= deltaTime;
+            
+            if (timeLeft <= 0) {
+                timeLeft = 0;
+                gameState = 'lose';
+                return;
+            }
+            
+            if (currentPattern === Pattern.HOURGLASS) {
+                scrollY += SCROLL_SPEED * deltaTime;
+                if (scrollY >= worldRows.length * CELL_H) {
+                    scrollY = 0;
+                }
+            } else {
+                moveTimer += deltaTime;
+                spawnTimer += deltaTime;
+                
+                if (moveTimer >= MOVE_INTERVAL) {
+                    moveTimer = 0;
+                    moveRedCells();
+                }
+                if (spawnTimer >= SPAWN_INTERVAL) {
+                    spawnTimer = 0;
+                    spawnBlueCell();
+                }
+            }
+            
+            // Update blink effects
+            for (const [key, val] of blinkCells) {
+                if (val <= 0) blinkCells.delete(key);
+                else blinkCells.set(key, val - 1);
+            }
+            
+            // Update flash
+            if (flashAlpha > 0) flashAlpha -= 8;
+            
+            // Update particles
+            particles = particles.filter(p => p.update());
+        }
+        
+        function drawGrid() {
+            if (currentPattern === Pattern.HOURGLASS) {
+                const { grid, offsetY } = getVisibleGrid();
+                
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        const x = c * CELL_W;
+                        const y = r * CELL_H - offsetY;
+                        const cellType = grid[r][c];
+                        const blinkOn = blinkCells.has(`${c},${r}`);
+                        
+                        let baseColor, edgeColor;
+                        
+                        if (blinkOn) {
+                            baseColor = [255, 255, 255];
+                            edgeColor = [200, 200, 200];
+                        } else if (cellType === 'danger') {
+                            const t = pulse(animTime + r * 0.1, 4);
+                            baseColor = lerpColor([210, 30, 30], [255, 75, 75], t);
+                            edgeColor = [100, 8, 8];
+                        } else if (cellType === 'point') {
+                            const t = pulse(animTime + c * 0.15, 3);
+                            baseColor = lerpColor([35, 105, 250], [95, 165, 255], t);
+                            edgeColor = [12, 45, 155];
+                        } else {
+                            baseColor = [14, 16, 28];
+                            edgeColor = [28, 30, 48];
+                        }
+                        
+                        ctx.fillStyle = `rgb(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]})`;
+                        ctx.fillRect(x, y, CELL_W - 1, CELL_H - 1);
+                        ctx.strokeStyle = `rgb(${edgeColor[0]}, ${edgeColor[1]}, ${edgeColor[2]})`;
+                        ctx.strokeRect(x, y, CELL_W - 1, CELL_H - 1);
+                        
+                        if (cellType === 'point' && !blinkOn) {
+                            const radius = Math.max(3, Math.min(CELL_W, CELL_H) / 5);
+                            ctx.beginPath();
+                            ctx.arc(x + CELL_W / 2, y + CELL_H / 2, radius, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgb(95, 165, 255)`;
+                            ctx.fill();
+                            
+                            ctx.globalAlpha = 0.3 + 0.3 * pulse(animTime + c + r, 3);
+                            ctx.beginPath();
+                            ctx.arc(x + CELL_W / 2, y + CELL_H / 2, radius * 1.8, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgb(95, 165, 255)`;
+                            ctx.fill();
+                            ctx.globalAlpha = 1;
+                        }
+                        
+                        // Cell numbers
+                        if (CELL_W >= 30) {
+                            ctx.font = "10px monospace";
+                            ctx.fillStyle = "#3a3e5e";
+                            ctx.fillText(`${r * COLS + c + 1}`, x + 3, y + 12);
+                        }
+                    }
+                }
+            } else {
+                // Pattern 2 drawing
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        const x = c * CELL_W;
+                        const y = r * CELL_H;
+                        const cellKey = `${c},${r}`;
+                        const blinkOn = blinkCells.has(cellKey);
+                        
+                        let baseColor, edgeColor;
+                        
+                        if (blinkOn) {
+                            baseColor = [255, 255, 255];
+                            edgeColor = [200, 200, 200];
+                        } else if (redCells.has(cellKey)) {
+                            const t = pulse(animTime + r * 0.1, 4);
+                            baseColor = lerpColor([210, 30, 30], [255, 75, 75], t);
+                            edgeColor = [100, 8, 8];
+                        } else if (blueCells.has(cellKey)) {
+                            const t = pulse(animTime + c * 0.15, 3);
+                            baseColor = lerpColor([35, 105, 250], [95, 165, 255], t);
+                            edgeColor = [12, 45, 155];
+                        } else if (greenCells.has(cellKey)) {
+                            const t = pulse(animTime + r * 0.08, 2.5);
+                            baseColor = lerpColor([30, 185, 75], [55, 230, 115], t);
+                            edgeColor = [12, 100, 42];
+                        } else {
+                            baseColor = [14, 16, 28];
+                            edgeColor = [28, 30, 48];
+                        }
+                        
+                        ctx.fillStyle = `rgb(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]})`;
+                        ctx.fillRect(x, y, CELL_W - 1, CELL_H - 1);
+                        ctx.strokeStyle = `rgb(${edgeColor[0]}, ${edgeColor[1]}, ${edgeColor[2]})`;
+                        ctx.strokeRect(x, y, CELL_W - 1, CELL_H - 1);
+                        
+                        if (blueCells.has(cellKey) && !blinkOn) {
+                            const radius = Math.max(3, Math.min(CELL_W, CELL_H) / 5);
+                            ctx.beginPath();
+                            ctx.arc(x + CELL_W / 2, y + CELL_H / 2, radius, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgb(95, 165, 255)`;
+                            ctx.fill();
+                            
+                            ctx.globalAlpha = 0.3 + 0.3 * pulse(animTime + c + r, 3);
+                            ctx.beginPath();
+                            ctx.arc(x + CELL_W / 2, y + CELL_H / 2, radius * 1.8, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgb(95, 165, 255)`;
+                            ctx.fill();
+                            ctx.globalAlpha = 1;
+                        }
+                        
+                        if (CELL_W >= 30) {
+                            ctx.font = "10px monospace";
+                            ctx.fillStyle = "#3a3e5e";
+                            ctx.fillText(`${r * COLS + c + 1}`, x + 3, y + 12);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function drawPanel() {
+            const panelX = GRID_W;
+            ctx.fillStyle = "#0e1020";
+            ctx.fillRect(panelX, 0, PANEL_W, canvas.height);
+            ctx.strokeStyle = "#2a2e4e";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(panelX, 0, PANEL_W, canvas.height);
+            
+            const centerX = panelX + PANEL_W / 2;
+            let y = 25;
+            
+            // Title
+            ctx.font = "bold 28px 'Segoe UI'";
+            ctx.fillStyle = "#ffd700";
+            ctx.textAlign = "center";
+            ctx.fillText("GRID", centerX, y);
+            ctx.fillStyle = "#88aaff";
+            ctx.fillText("CHALLENGE", centerX, y + 32);
+            y += 70;
+            
+            // Pattern name
+            const patternName = currentPattern === Pattern.HOURGLASS ? "HOURGLASS" : "GREEN BOUNDARY";
+            ctx.font = "bold 14px monospace";
+            ctx.fillStyle = "#88aaff";
+            ctx.fillText(`PATTERN ${currentPattern} · ${patternName}`, centerX, y);
+            y += 25;
+            
+            // Instructions
+            ctx.font = "12px monospace";
+            ctx.fillStyle = "#95a5ff";
+            ctx.fillText("Click BLUE  →  +10 pts", centerX, y);
+            ctx.fillStyle = "#ff7575";
+            ctx.fillText("Click RED   →  -1 life!", centerX, y + 18);
+            y += 45;
+            
+            // Progress bar
+            const progress = pointsClicked / targetPoints;
+            ctx.fillStyle = "#1a1e30";
+            ctx.fillRect(panelX + 15, y, PANEL_W - 30, 12);
+            ctx.fillStyle = "#5a8aff";
+            ctx.fillRect(panelX + 15, y, (PANEL_W - 30) * Math.min(1, progress), 12);
+            ctx.fillStyle = "#aaa";
+            ctx.font = "10px monospace";
+            ctx.fillText(`Blue clicks: ${pointsClicked}/${targetPoints}`, centerX, y + 25);
+            y += 42;
+            
+            // Score
+            ctx.font = "bold 14px monospace";
+            ctx.fillStyle = "#aaa";
+            ctx.fillText("SCORE", centerX, y);
+            ctx.font = "bold 32px monospace";
+            ctx.fillStyle = "#ffd700";
+            ctx.fillText(score, centerX, y + 32);
+            y += 55;
+            
+            // Lives (hearts)
+            ctx.font = "bold 14px monospace";
+            ctx.fillStyle = "#aaa";
+            ctx.fillText("LIVES", centerX, y);
+            for (let i = 0; i < 5; i++) {
+                const heartX = centerX - 50 + i * 25;
+                ctx.fillStyle = i < lives ? "#ff4444" : "#442222";
+                ctx.font = "20px monospace";
+                ctx.fillText("♥", heartX, y + 22);
+            }
+            y += 42;
+            
+            // Time
+            ctx.fillStyle = "#aaa";
+            ctx.fillText("TIME", centerX, y);
+            const timePercent = timeLeft / (currentPattern === Pattern.HOURGLASS ? 50 : 60);
+            ctx.fillStyle = "#2a2e4e";
+            ctx.fillRect(panelX + 15, y + 18, PANEL_W - 30, 12);
+            ctx.fillStyle = timePercent > 0.5 ? "#5aff5a" : (timePercent > 0.2 ? "#ffaa44" : "#ff4444");
+            ctx.fillRect(panelX + 15, y + 18, (PANEL_W - 30) * Math.max(0, timePercent), 12);
+            ctx.fillStyle = "white";
+            ctx.font = "bold 16px monospace";
+            ctx.fillText(`${Math.max(0, timeLeft.toFixed(1))}s`, centerX, y + 48);
+            y += 75;
+            
+            // Switch buttons
+            ctx.fillStyle = "#aaa";
+            ctx.font = "12px monospace";
+            ctx.fillText("SWITCH PATTERN", centerX, y);
+            ctx.fillStyle = currentPattern === Pattern.HOURGLASS ? "#3a6fcf" : "#2a2e4e";
+            ctx.fillRect(panelX + 20, y + 12, 80, 28);
+            ctx.fillStyle = currentPattern === Pattern.GREEN_BOUNDARY ? "#4a8f4f" : "#2a2e4e";
+            ctx.fillRect(panelX + 120, y + 12, 80, 28);
+            ctx.fillStyle = "white";
+            ctx.font = "bold 14px monospace";
+            ctx.fillText("P1", panelX + 60, y + 32);
+            ctx.fillText("P2", panelX + 160, y + 32);
+            y += 55;
+            
+            // Restart button
+            ctx.fillStyle = "#3a7f3f";
+            ctx.fillRect(panelX + 20, y, PANEL_W - 40, 32);
+            ctx.fillStyle = "white";
+            ctx.fillText("↺ RESTART", centerX, y + 22);
+            y += 50;
+            
+            // Legend
+            ctx.fillStyle = "#aaa";
+            ctx.fillText("LEGEND", centerX, y);
+            const legendItems = [
+                { color: [95, 165, 255], label: "Blue = Click! +10" },
+                { color: [255, 75, 75], label: "Red = Danger! -1" },
+                { color: [55, 230, 115], label: "Green = Safe zone" },
+                { color: [14, 16, 28], label: "Black = Empty" }
+            ];
+            y += 22;
+            for (const item of legendItems) {
+                ctx.fillStyle = `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})`;
+                ctx.fillRect(panelX + 18, y, 14, 14);
+                ctx.fillStyle = "#aaa";
+                ctx.font = "10px monospace";
+                ctx.fillText(item.label, panelX + 38, y + 11);
+                y += 18;
+            }
+            
+            ctx.textAlign = "left";
+        }
+        
+        function drawOverlay() {
+            if (gameState === 'win') {
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.fillRect(0, 0, GRID_W, canvas.height);
+                ctx.textAlign = "center";
+                ctx.font = "bold 48px monospace";
+                ctx.fillStyle = "#ffd700";
+                ctx.fillText("YOU WIN!", GRID_W / 2, canvas.height / 2 - 30);
+                ctx.font = "24px monospace";
+                ctx.fillStyle = "white";
+                ctx.fillText(`Final Score: ${score}`, GRID_W / 2, canvas.height / 2 + 20);
+                ctx.font = "16px monospace";
+                ctx.fillStyle = "#aaa";
+                ctx.fillText("Press R to play again", GRID_W / 2, canvas.height / 2 + 70);
+                ctx.textAlign = "left";
+            } else if (gameState === 'lose') {
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.fillRect(0, 0, GRID_W, canvas.height);
+                ctx.textAlign = "center";
+                ctx.font = "bold 48px monospace";
+                ctx.fillStyle = "#ff4444";
+                ctx.fillText("GAME OVER", GRID_W / 2, canvas.height / 2 - 30);
+                ctx.font = "24px monospace";
+                ctx.fillStyle = "white";
+                ctx.fillText(`Score: ${score}`, GRID_W / 2, canvas.height / 2 + 20);
+                ctx.font = "16px monospace";
+                ctx.fillStyle = "#aaa";
+                ctx.fillText("Press R to try again", GRID_W / 2, canvas.height / 2 + 70);
+                ctx.textAlign = "left";
+            }
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            drawPanel();
+            
+            // Draw particles
+            for (const p of particles) {
+                p.draw(ctx);
+            }
+            
+            // Draw flash overlay
+            if (flashAlpha > 0 && flashColor) {
+                ctx.fillStyle = `rgba(${flashColor[0]}, ${flashColor[1]}, ${flashColor[2]}, ${flashAlpha / 255})`;
+                ctx.fillRect(0, 0, GRID_W, canvas.height);
+            }
+            
+            drawOverlay();
+        }
+        
+        function gameLoop(timestamp) {
+            if (!gameRunning) return;
+            
+            const deltaTime = Math.min(0.033, (timestamp - lastTimestamp) / 1000);
+            lastTimestamp = timestamp;
+            
+            if (gameState === 'playing') {
+                update(deltaTime);
+            }
+            
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        // ============ EVENT HANDLERS ============
+        function handleCanvasClick(e) {
+            if (gameState !== 'playing') return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            let mouseX = (e.clientX - rect.left) * scaleX;
+            let mouseY = (e.clientY - rect.top) * scaleY;
+            
+            // Check if click is on panel
+            if (mouseX > GRID_W) {
+                const panelX = GRID_W;
+                // Check button clicks
+                if (mouseY >= 355 && mouseY <= 395) {
+                    if (mouseX >= panelX + 20 && mouseX <= panelX + 100) {
+                        switchPattern(Pattern.HOURGLASS);
+                    } else if (mouseX >= panelX + 120 && mouseX <= panelX + 200) {
+                        switchPattern(Pattern.GREEN_BOUNDARY);
+                    }
+                } else if (mouseY >= 405 && mouseY <= 437) {
+                    restartGame();
+                }
+                return;
+            }
+            
+            // Grid click
+            const cellX = Math.floor(mouseX / CELL_W);
+            const cellY = Math.floor(mouseY / CELL_H);
+            
+            if (cellX >= 0 && cellX < COLS && cellY >= 0 && cellY < ROWS) {
+                if (currentPattern === Pattern.HOURGLASS) {
+                    handleClickPattern1(cellX, cellY, mouseX, mouseY);
+                } else {
+                    handleClickPattern2(cellX, cellY, mouseX, mouseY);
+                }
+            }
+        }
+        
+        function switchPattern(pattern) {
+            currentPattern = pattern;
+            resetGameState();
+        }
+        
+        function resetGameState() {
+            score = 0;
+            lives = 5;
+            pointsClicked = 0;
+            targetPoints = Math.max(10, Math.floor((ROWS * COLS) / 12));
+            timeLeft = currentPattern === Pattern.HOURGLASS ? 50 : 60;
+            gameState = 'playing';
+            blinkCells.clear();
+            particles = [];
+            flashAlpha = 0;
+            scrollY = 0;
+            moveTimer = 0;
+            spawnTimer = 0;
+            
+            if (currentPattern === Pattern.HOURGLASS) {
+                buildWorld();
+            } else {
+                initPattern2();
+            }
+        }
+        
+        function restartGame() {
+            resetGameState();
+        }
+        
+        function initGame(rows, cols) {
+            ROWS = rows;
+            COLS = cols;
+            CELL_W = Math.floor((900 - PANEL_W) / COLS);
+            CELL_H = Math.floor(700 / ROWS);
+            GRID_W = CELL_W * COLS;
+            
+            canvas.width = GRID_W + PANEL_W;
+            canvas.height = CELL_H * ROWS;
+            
+            targetPoints = Math.max(10, Math.floor((ROWS * COLS) / 12));
+            timeLeft = currentPattern === Pattern.HOURGLASS ? 50 : 60;
+            
+            resetGameState();
+            
+            gameRunning = true;
+            lastTimestamp = 0;
+            if (animationId) cancelAnimationFrame(animationId);
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        function startGame() {
+            const rows = parseInt(rowsInput.value);
+            const cols = parseInt(colsInput.value);
+            
+            if (rows < 8 || rows > 20) {
+                setupError.textContent = "Rows must be between 8 and 20";
+                return;
+            }
+            if (cols < 8 || cols > 20) {
+                setupError.textContent = "Cols must be between 8 and 20";
+                return;
+            }
+            
+            setupError.textContent = "";
+            setupScreen.style.display = "none";
+            gameContainer.style.display = "flex";
+            
+            initGame(rows, cols);
+        }
+        
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (setupScreen.style.display !== 'none') return;
+            
+            if (e.key === 'r' || e.key === 'R') {
+                restartGame();
+            } else if (e.key === '1') {
+                switchPattern(Pattern.HOURGLASS);
+            } else if (e.key === '2') {
+                switchPattern(Pattern.GREEN_BOUNDARY);
+            }
+        });
+        
+        canvas.addEventListener('click', handleCanvasClick);
+        startBtn.addEventListener('click', startGame);
+        
+        // Set default values
+        rowsInput.value = 12;
+        colsInput.value = 10;
+    </script>
+</body>
+</html>
